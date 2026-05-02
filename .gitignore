@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.*
+
+# Expo
+.expo/
+
+# Logs
+logs/
+*.log
+
+# Build
+dist/
+build/

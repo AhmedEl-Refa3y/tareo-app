@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "TAREO",
+    "slug": "tareo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "tareo",
+    "userInterfaceStyle": "light",
+
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0FA3B1"
+    },
+
+    "assetBundlePatterns": ["**/*"],
+
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tareo.app"
+    },
+
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#0FA3B1"
+      },
+      "package": "com.tareo.app",
+      "permissions": []
+    },
+
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+
+    "experiments": {
+      "typedRoutes": true
+    },
+
+    "plugins": ["expo-router"]
+  }
+}
