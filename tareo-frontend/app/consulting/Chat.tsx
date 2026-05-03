@@ -13,17 +13,14 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import EndSessionModal from "../../components/EndSessionModal";
 import { useAuth } from "../../contexts/AuthContext";
 import api from "../../services/api";
-import socketService from "../../services/socket";
-import { Colors } from "../../constants/colors";
 
 interface Message {
   _id: string;
   content: string;
-  senderId?: any;
   senderType: string;
   createdAt: string;
 }
@@ -41,228 +38,85 @@ export default function Chat() {
 
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
+  const isMounted = useRef(true);
 
   useEffect(() => {
-    // ❌ OLD
-    // createSession();
-
-    // ✅ NEW
     loadLatestSession();
-
     return () => {
-      socketService.disconnect();
+      isMounted.current = false;
     };
   }, []);
 
-  // ✅ NEW: Load latest saved session when opening Text Chat
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
+
   const loadLatestSession = async () => {
     try {
-      setIsLoading(true);
-      setInputText("");
-
       const res = await api.get("/ai/latest-session");
 
-      setSessionId(res.data.session._id);
-      setMessages(res.data.messages || []);
-    } catch (error: any) {
-      console.error(
-        "Failed to load latest session:",
-        error?.response?.data || error,
-      );
+      if (!isMounted.current) return;
 
+      setSessionId(res.data.session?._id || null);
+      setMessages(res.data.messages || []);
+    } catch (err) {
       setMessages([
         {
           _id: Date.now().toString(),
-          content: "Error: لم أستطع تحميل آخر محادثة.",
+          content: "حصل مشكلة في تحميل الشات 😢",
           senderType: "doctor",
           createdAt: new Date().toISOString(),
         },
       ]);
     } finally {
       setIsLoading(false);
+      scrollToBottom();
     }
   };
 
-  // ✅ NEW: Start chat through Backend → Knowledge Base → MongoDB
-  const startNewAIChat = async () => {
-    try {
-      setIsLoading(true);
-      setMessages([]);
-      setInputText("");
-      setSessionId(null);
-
-      const res = await api.post("/ai/start");
-
-      console.log("✅ AI START RESPONSE:", res.data);
-
-      setSessionId(res.data.session._id);
-      setMessages(res.data.messages || []);
-    } catch (error: any) {
-      console.error(
-        "❌ Failed to start AI chat:",
-        error?.response?.data || error,
-      );
-
-      setMessages([
-        {
-          _id: Date.now().toString(),
-          content:
-            "Error: لم أستطع بدء جلسة الذكاء الاصطناعي. راجع backend terminal.",
-          senderType: "doctor",
-          createdAt: new Date().toISOString(),
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // ❌ OLD: old backend/socket session
-  /*
-  const createSession = async () => {
-    try {
-      const response = await api.post("/sessions", { type: "chat" });
-      const newSessionId = response.data.data._id;
-      setSessionId(newSessionId);
-
-      socketService.connect();
-      socketService.joinSession(newSessionId);
-
-      socketService.onNewMessage((data) => {
-        setMessages((prev) => [...prev, data.message]);
-      });
-
-      socketService.onUserTyping((data) => {
-        setIsTyping(data.isTyping);
-      });
-
-      await fetchMessages(newSessionId);
-    } catch (error) {
-      console.error("Failed to create session:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  */
-
-  // ❌ OLD
-  /*
-  const fetchMessages = async (id: string) => {
-    try {
-      const response = await api.get(`/messages/${id}`);
-      setMessages(response.data.data);
-    } catch (error) {
-      console.error("Failed to fetch messages:", error);
-    }
-  };
-  */
-
-  // ✅ NEW: Send message to Backend, Backend sends to KB and saves in MongoDB
   const handleSend = async () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || !sessionId) return;
 
-    const userText = inputText;
-
-    const tempUserMessage: Message = {
+    const userMsg: Message = {
       _id: Date.now().toString(),
-      content: userText,
+      content: inputText,
       senderType: "patient",
       createdAt: new Date().toISOString(),
     };
 
-    setMessages((prev) => [...prev, tempUserMessage]);
+    setMessages((prev) => [...prev, userMsg]);
     setInputText("");
-
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 100);
-
-    if (!sessionId) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          _id: (Date.now() + 1).toString(),
-          content:
-            "Error: لا توجد جلسة نشطة. جرّب اضغط New Chat أو راجع backend terminal.",
-          senderType: "doctor",
-          createdAt: new Date().toISOString(),
-        },
-      ]);
-      return;
-    }
+    scrollToBottom();
 
     try {
       setIsTyping(true);
 
       const res = await api.post("/ai/message", {
         sessionId,
-        message: userText,
+        message: userMsg.content,
       });
 
-      console.log("✅ AI MESSAGE RESPONSE:", res.data);
+      if (!isMounted.current) return;
 
-      setTimeout(() => {
-        setMessages((prev) => [...prev, res.data.doctorMessage]);
-
-        setTimeout(() => {
-          inputRef.current?.focus();
-        }, 100);
-      }, 2000);
-    } catch (error: any) {
-      console.error(
-        "❌ Failed to send AI message:",
-        error?.response?.data || error,
-      );
-
+      setMessages((prev) => [...prev, res.data.doctorMessage]);
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
-          _id: (Date.now() + 2).toString(),
-          content: "Error: الرسالة لم تصل للـ AI. راجع backend terminal.",
+          _id: (Date.now() + 1).toString(),
+          content: "فشل إرسال الرسالة ❌",
           senderType: "doctor",
           createdAt: new Date().toISOString(),
         },
       ]);
     } finally {
-      setTimeout(() => {
-        setIsTyping(false);
-      }, 2000);
+      setIsTyping(false);
+      scrollToBottom();
     }
   };
 
-  // ❌ OLD
-  /*
-  const handleSend = async () => {
-    if (!inputText.trim() || !sessionId) return;
-
-    try {
-      const response = await api.post("/messages", {
-        sessionId,
-        content: inputText,
-      });
-
-      socketService.sendMessage(sessionId, response.data.data);
-      setInputText("");
-    } catch (error) {
-      console.error("Failed to send message:", error);
-    }
-  };
-  */
-
-  // ✅ NEW: local typing only
-  const handleTyping = (text: string) => {
-    setInputText(text);
-  };
-
-  // ❌ OLD
-  /*
-  const handleTyping = (text: string) => {
-    setInputText(text);
-    socketService.emitTyping(sessionId!, text.length > 0);
-  };
-  */
-
-  // ✅ NEW: New chat saves old session and starts fresh one
   const handleNewChat = async () => {
     try {
       setIsLoading(true);
@@ -271,124 +125,87 @@ export default function Chat() {
         oldSessionId: sessionId,
       });
 
-      setSessionId(res.data.session._id);
-      setMessages(res.data.messages);
-      setInputText("");
+      if (!isMounted.current) return;
 
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
-    } catch (error) {
-      console.error("Failed to create new chat:", error);
+      setSessionId(res.data.session._id);
+      setMessages(res.data.messages || []);
+      setInputText("");
     } finally {
       setIsLoading(false);
+      scrollToBottom();
     }
   };
 
-  // ✅ NEW: End chat through backend then open rating
   const handleEndChat = async () => {
-    try {
-      await api.post("/ai/end", {
-        sessionId,
-      });
+    await api.post("/ai/end", { sessionId });
 
-      setShowEndModal(false);
-
-      router.push({
-        pathname: "/rating/feedback",
-        params: { sessionId: sessionId || "" },
-      });
-    } catch (error) {
-      console.error("Failed to end chat:", error);
-    }
-  };
-
-  // ❌ OLD
-  /*
-  const handleEndChat = async () => {
-    if (sessionId) {
-      await api.put(`/sessions/${sessionId}/end`);
-    }
     setShowEndModal(false);
+
     router.push({
       pathname: "/rating/feedback",
       params: { sessionId: sessionId || "" },
     });
   };
-  */
 
-  const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  const renderItem = ({ item }: { item: Message }) => {
+  const renderItem = useCallback(({ item }: { item: Message }) => {
     const isUser =
       item.senderType === (user?.role === "doctor" ? "doctor" : "patient");
 
     return (
       <View
-        style={[
-          styles.messageWrapper,
-          isUser ? styles.userAlign : styles.doctorAlign,
-        ]}
+        style={[styles.messageRow, isUser ? styles.userRow : styles.botRow]}
       >
         <View
-          style={[
-            styles.bubble,
-            isUser ? styles.userBubble : styles.doctorBubble,
-          ]}
+          style={[styles.bubble, isUser ? styles.userBubble : styles.botBubble]}
         >
-          <Text style={[styles.messageText, isUser && { color: Colors.white }]}>
+          <Text style={[styles.text, isUser && { color: "#fff" }]}>
             {item.content}
           </Text>
-        </View>
 
-        <Text style={styles.time}>{formatTime(item.createdAt)}</Text>
+          <Text style={[styles.time, isUser && { color: "#ddd" }]}>
+            {new Date(item.createdAt).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </Text>
+        </View>
       </View>
     );
-  };
+  }, []);
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-        </View>
+      <SafeAreaView style={styles.center}>
+        <ActivityIndicator size="large" color="#007AFF" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
 
+      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color={Colors.dark} />
+          <Ionicons name="arrow-back" size={22} />
         </TouchableOpacity>
 
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Dr. TAREO</Text>
-          <Text style={styles.headerSub}>Online</Text>
+          <Text style={styles.title}>Dr. TAREO</Text>
+          <Text style={styles.online}>Online</Text>
         </View>
 
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <TouchableOpacity style={styles.newChatBtn} onPress={handleNewChat}>
-            <Text style={styles.newChatText}>New Chat</Text>
-          </TouchableOpacity>
+        <TouchableOpacity onPress={handleNewChat}>
+          <Ionicons name="refresh" size={20} />
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.endBtn}
-            onPress={() => setShowEndModal(true)}
-          >
-            <Text style={styles.endText}>End</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity onPress={() => setShowEndModal(true)}>
+          <Ionicons name="close" size={22} color="red" />
+        </TouchableOpacity>
       </View>
 
+      {/* CHAT */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -398,32 +215,29 @@ export default function Chat() {
           data={messages}
           keyExtractor={(item) => item._id}
           renderItem={renderItem}
-          contentContainerStyle={styles.chat}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
+          contentContainerStyle={{ padding: 10 }}
+          onContentSizeChange={scrollToBottom}
         />
 
         {isTyping && (
-          <View style={styles.typingWrapper}>
-            <Text style={styles.typingText}>Dr. TAREO is typing...</Text>
+          <View style={styles.typing}>
+            <Text style={{ color: "#666" }}>Typing...</Text>
           </View>
         )}
 
-        <View style={styles.inputContainer}>
-          <TouchableOpacity style={styles.micBtn}>
-            <Ionicons name="mic-outline" size={22} color={Colors.lightGray} />
-          </TouchableOpacity>
-
+        {/* INPUT */}
+        <View style={styles.inputWrapper}>
           <TextInput
             ref={inputRef}
-            placeholder="Type a message..."
-            style={styles.input}
             value={inputText}
-            onChangeText={handleTyping}
+            onChangeText={setInputText}
+            placeholder="اكتب رسالة..."
+            style={styles.input}
             onSubmitEditing={handleSend}
           />
 
-          <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
-            <Ionicons name="send" size={18} color={Colors.white} />
+          <TouchableOpacity style={styles.send} onPress={handleSend}>
+            <Ionicons name="send" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -438,154 +252,82 @@ export default function Chat() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.white },
-
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  container: { flex: 1, backgroundColor: "#F9FAFB" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
   header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    padding: 15,
+    gap: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
+    borderColor: "#eee",
   },
 
-  headerCenter: { flex: 1, marginLeft: 12 },
+  headerCenter: { flex: 1 },
 
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: Colors.dark,
+  title: { fontWeight: "bold", fontSize: 16 },
+
+  online: { color: "green", fontSize: 12 },
+
+  messageRow: {
+    marginVertical: 6,
+    flexDirection: "row",
   },
 
-  headerSub: {
-    fontSize: 12,
-    color: Colors.success,
-  },
-
-  newChatBtn: {
-    backgroundColor: "#E0F2FE",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    marginRight: 8,
-  },
-
-  newChatText: {
-    color: "#0284C7",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-
-  endBtn: {
-    backgroundColor: "#FEE2E2",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 14,
-  },
-
-  endText: {
-    color: "#EF4444",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-
-  chat: {
-    padding: 16,
-    paddingBottom: 10,
-  },
-
-  messageWrapper: {
-    marginBottom: 14,
-    maxWidth: "80%",
-  },
-
-  doctorAlign: {
-    alignSelf: "flex-start",
-  },
-
-  userAlign: {
-    alignSelf: "flex-end",
-  },
+  userRow: { justifyContent: "flex-end" },
+  botRow: { justifyContent: "flex-start" },
 
   bubble: {
-    borderRadius: 20,
+    maxWidth: "75%",
     padding: 12,
-  },
-
-  doctorBubble: {
-    backgroundColor: "#F8FAFC",
-    borderTopLeftRadius: 4,
+    borderRadius: 16,
   },
 
   userBubble: {
-    backgroundColor: Colors.primary,
-    borderTopRightRadius: 4,
+    backgroundColor: "#007AFF",
+    borderBottomRightRadius: 4,
   },
 
-  messageText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: Colors.dark,
+  botBubble: {
+    backgroundColor: "#E5E7EB",
+    borderBottomLeftRadius: 4,
   },
+
+  text: { fontSize: 14 },
 
   time: {
-    fontSize: 11,
-    color: Colors.lightGray,
+    fontSize: 10,
     marginTop: 4,
+    color: "#666",
     alignSelf: "flex-end",
   },
 
-  typingWrapper: {
-    paddingHorizontal: 16,
-    marginBottom: 6,
+  typing: {
+    paddingHorizontal: 15,
+    paddingBottom: 5,
   },
 
-  typingText: {
-    fontSize: 12,
-    color: Colors.gray,
-  },
-
-  inputContainer: {
+  inputWrapper: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    padding: 10,
+    backgroundColor: "#fff",
     borderTopWidth: 1,
-    borderTopColor: "#F3F4F6",
-    gap: 10,
-  },
-
-  micBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "#F3F4F6",
-    justifyContent: "center",
-    alignItems: "center",
+    borderColor: "#eee",
   },
 
   input: {
     flex: 1,
-    height: 42,
-    borderRadius: 21,
-    paddingHorizontal: 16,
-    backgroundColor: "#F9FAFB",
-    fontSize: 14,
-    color: Colors.dark,
+    backgroundColor: "#F3F4F6",
+    borderRadius: 25,
+    paddingHorizontal: 15,
+    height: 45,
   },
 
-  sendBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: Colors.primary,
-    justifyContent: "center",
-    alignItems: "center",
+  send: {
+    backgroundColor: "#007AFF",
+    marginLeft: 10,
+    padding: 12,
+    borderRadius: 25,
   },
 });
